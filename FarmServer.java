@@ -10,6 +10,9 @@ import java.net.URL;
 import java.util.Collection;
 import java.util.logging.Logger;
 
+import static java.lang.Math.max;
+import static java.lang.Math.min;
+
 public class FarmServer {
     private static final Logger logger = Logger.getLogger(FarmServer.class.getName());
 
@@ -87,6 +90,32 @@ public class FarmServer {
         @Override
         public void getFarmMessage(VMSDataRequest request, StreamObserver<VMSDataResponse> responseObserver) {
             responseObserver.onNext(checkVMSDataResponse(request));
+            responseObserver.onCompleted();
+        }
+
+        @Override
+        public void listFarmMessage(RequestWrapper request, StreamObserver<VMSDataResponse> responseObserver) {
+            for (VMSDataResponse response : responses) {
+                if (!FarmUtil.exists(response)) {
+                    continue;
+                }
+                if (request.hasReq1() && request.hasReq2() && request.hasReq3() && request.hasReq4()) {
+                    responseObserver.onNext(response);
+                }
+            }
+            responseObserver.onCompleted();
+        }
+
+        @Override
+        public void listFarmMessageBySmallWrapper(RequestWrapperSmall request, StreamObserver<VMSDataResponse> responseObserver) {
+            for (VMSDataResponse response : responses) {
+                if (!FarmUtil.exists(response)) {
+                    continue;
+                }
+                if (request.hasReq1()) {
+                    responseObserver.onNext(response);
+                }
+            }
             responseObserver.onCompleted();
         }
 

@@ -35,4 +35,7 @@ public class FarmUtil {
             input.close();
         }
     }
+    public static boolean exists(VMSDataResponse response) {
+        return response != null && !response.getItem().getGuid().isEmpty();
+    }
 }
