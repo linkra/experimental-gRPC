@@ -1,0 +1,28 @@
+{
+  "response": [
+    {
+      "item": {
+        "guid": 407838351,
+        "owner": "Storgården1",
+        "messagetype": 2,
+        "sourceid":456123
+      }
+    },
+    {
+      "item": {
+        "guid": 407838352,
+        "owner": "Storgården2",
+        "messagetype": 1,
+        "sourceid":456124
+      }
+    },
+    {
+      "item": {
+        "guid": 407838353,
+        "owner": "Storgården3",
+        "messagetype": 2,
+        "sourceid":456125
+      }
+    }
+  ]
+}
