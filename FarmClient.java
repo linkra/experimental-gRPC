@@ -1,15 +1,13 @@
 package io.grpc.proxy;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.Message;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -21,8 +19,6 @@ public class FarmClient {
     private final ManagedChannel channel;
     private final FarmGrpc.FarmBlockingStub blockingStub;
     private final FarmGrpc.FarmStub asyncStub;
-
-    private Random random = new Random();
 
     /**
      * Construct client for accessing Farm server at {@code host:port}.
@@ -40,7 +36,9 @@ public class FarmClient {
         asyncStub = FarmGrpc.newStub(channel);
     }
 
-    /** Issues several different requests and then exits. */
+    /**
+     * Issues several different requests and then exits.
+     */
     public static void main(String[] args) throws InterruptedException {
         List<VMSDataResponse> responses;
         try {
@@ -57,21 +55,26 @@ public class FarmClient {
             //client.getVMSDataResponse("0", 0);
 
             /*client.listVMSDataResponse(createRequest("407838353", 456125),
-                                                       createRequest("407838354",  456126),
-                                                       createRequest("407838355",  456127),
-                                                       createRequest("407838356",  456128));
-            */
-            client.listVMSDataResponseBySmallWrapper(createRequest("407838351", 456123));
+                    createRequest("407838354", 456126),
+                    createRequest("407838355", 456127),
+                    createRequest("407838356", 456128));
+*/
+            //client.listVMSDataResponseBySmallWrapper(createRequest("407838351", 456123));
 
-            /*// Record a few randomly selected points from the features file.
-            client.recordRoute(features, 10);
+            List<Item> items = new ArrayList<>();
+            for (VMSDataResponse response : responses) {
+                items.add(response.getItem());
+            }
+            client.getFarmsSummaryMessage(items, 3);
+
+
 
             // Send and receive some notes.
-            CountDownLatch finishLatch = client.vmsChat();
+            CountDownLatch finishLatch = client.farmChat();
 
             if (!finishLatch.await(1, TimeUnit.MINUTES)) {
                 client.warning("routeChat can not finish within 1 minutes");
-            }*/
+            }
         } finally {
             client.shutdown();
         }
@@ -116,7 +119,7 @@ public class FarmClient {
                         .setReq2(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838354").setSourceid(456126)))
                         .setReq3(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838355").setSourceid(456127)))
                         .setReq4(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838356").setSourceid(456128)))
-                .build();
+                        .build();
 
         Iterator<VMSDataResponse> responseIterator;
         try {
@@ -149,6 +152,113 @@ public class FarmClient {
             warning("RPC failed: {0}", e.getStatus());
         }
     }
+
+    /**
+     * recordRoute
+     */
+    public void getFarmsSummaryMessage(List<Item> items, int numRequests) throws InterruptedException {
+        info("*** getFarmsSummaryMessage");
+        final CountDownLatch finishLatch = new CountDownLatch(1);
+
+        StreamObserver<FarmsSummary> farmsStreamObserver = new StreamObserver<FarmsSummary>() {
+            @Override
+            public void onNext(FarmsSummary summary) {
+                info("Found {0} requests", summary.getVMSDataRequestCount());
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                warning("getFarmsSummaryMessage failed: {0}", Status.fromThrowable(t));
+                finishLatch.countDown();
+            }
+
+            @Override
+            public void onCompleted() {
+                info("Finished getFarmsSummaryMessage");
+                finishLatch.countDown();
+            }
+        };
+
+        StreamObserver<Item> streamObserver = asyncStub.getFarmsSummaryMessage(farmsStreamObserver);
+        try {
+            // Send numRequests randomly selected from the responses list.
+            for (int i = 0; i < numRequests; ++i) {
+                Item item = items.get(i);
+                streamObserver.onNext(item);
+                // Sleep for a bit before sending the next one.
+               // Thread.sleep(random.nextInt(1000) + 500);
+                info("Sending " + item);
+                if (finishLatch.getCount() == 0) {
+                    // RPC completed or errored before we finished sending.
+                    // Sending further requests won't error, but they will just be thrown away.
+                    return;
+                }
+            }
+        } catch (RuntimeException e) {
+            // Cancel RPC
+            streamObserver.onError(e);
+            throw e;
+        }
+        // Mark the end of requests
+        streamObserver.onCompleted();
+
+        // Receiving happens asynchronously
+        if (!finishLatch.await(1, TimeUnit.MINUTES)) {
+            warning("recordRoute can not finish within 1 minutes");
+        }
+    }
+
+    public CountDownLatch farmChat() {
+        info("*** FarmChat");
+        final CountDownLatch finishLatch = new CountDownLatch(1);
+        StreamObserver<ItemNote> requestObserver =
+                asyncStub.farmChat(new StreamObserver<ItemNote>() {
+                    @Override
+                    public void onNext(ItemNote note) {
+                        info("Got message \"{0}\" at {1}, {2}", note.getMessage(), note.getItem().getOwner()
+                                , note.getItem().getSourceid());
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        warning("FarmChat Failed: {0}", Status.fromThrowable(t));
+                        finishLatch.countDown();
+                    }
+
+                    @Override
+                    public void onCompleted() {
+                        info("Finished FarmChat");
+                        finishLatch.countDown();
+                    }
+                });
+
+        try {
+            ItemNote[] requests =
+                    {newNote("First message", "storbonden", 10), newNote("Second message", "månskensbonden", 30),
+                            newNote("Third message", "lillbonden", 20), newNote("Fourth message", "mellanbonden", 40)};
+
+            for (ItemNote request : requests) {
+                info("Sending message \"{0}\" at {1}, {2}", request.getMessage(), request.getItem().getOwner(),
+                        request.getItem().getSourceid());
+                requestObserver.onNext(request);
+            }
+        } catch (RuntimeException e) {
+            // Cancel RPC
+            requestObserver.onError(e);
+            throw e;
+        }
+        // Mark the end of requests
+        requestObserver.onCompleted();
+
+        // return the latch while receiving happens asynchronously
+        return finishLatch;
+    }
+
+    private ItemNote newNote(String message, String owner, int sourceid) {
+        return ItemNote.newBuilder().setMessage(message)
+                .setItem(Item.newBuilder().setOwner(owner).setSourceid(sourceid).build()).build();
+    }
+
 
     private void info(String msg, Object... params) {
         logger.log(Level.INFO, msg, params);
