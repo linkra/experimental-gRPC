@@ -24,7 +24,6 @@ service Farm {
     // A simple rpc
     rpc GetFarmMessage (VMSDataRequest) returns (VMSDataResponse) {}
     // Two  server-to-client streaming rpc
-    rpc ListFarmMessage (RequestWrapper) returns (stream VMSDataResponse) {}
     rpc ListFarmMessageBySmallWrapper (RequestWrapperSmall) returns (stream VMSDataResponse) {}
     // A client-to-server streaming rpc
     rpc GetFarmsSummaryMessage(stream Item) returns (FarmsSummary) {}
@@ -37,13 +36,6 @@ message VMSDataRequest {
 }
 message VMSDataResponse {
     Item item = 1;
-}
-
-message RequestWrapper {
-    VMSDataRequest req1 = 1;
-    VMSDataRequest req2 = 2;
-    VMSDataRequest req3 = 3;
-    VMSDataRequest req4 = 4;
 }
 
 message RequestWrapperSmall {

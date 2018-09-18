@@ -1,8 +1,6 @@
 package io.grpc.proxy;
 
-import io.grpc.BindableService;
-import io.grpc.Server;
-import io.grpc.ServerBuilder;
+import io.grpc.*;
 import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
@@ -18,6 +16,7 @@ public class FarmServer {
 
     private  int port;
     private final Server server;
+    private  Metadata headers;
 
     public FarmServer(int port)  throws IOException{
         this(port, FarmUtil.getDefaultVMSDataResponseFile());
@@ -32,7 +31,9 @@ public class FarmServer {
      */
     public FarmServer(ServerBuilder<?> serverBuilder, int port, Collection<VMSDataResponse> response) {
         this.port = port;
-        server = serverBuilder.addService((BindableService) new FarmService(response)).build();
+        server = serverBuilder
+                .addService(ServerInterceptors.intercept(new FarmService(response), new HeaderServerInterceptor()))
+                .build();
     }
 
     /**
@@ -41,6 +42,7 @@ public class FarmServer {
     public void start() throws IOException {
         server.start();
         logger.info("Server started, listening on " + port);
+
         Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
             public void run() {
@@ -90,19 +92,6 @@ public class FarmServer {
         @Override
         public void getFarmMessage(VMSDataRequest request, StreamObserver<VMSDataResponse> responseObserver) {
             responseObserver.onNext(checkVMSDataResponse(request));
-            responseObserver.onCompleted();
-        }
-
-        @Override
-        public void listFarmMessage(RequestWrapper request, StreamObserver<VMSDataResponse> responseObserver) {
-            for (VMSDataResponse response : responses) {
-                if (!FarmUtil.exists(response)) {
-                    continue;
-                }
-                if (request.hasReq1() && request.hasReq2() && request.hasReq3() && request.hasReq4()) {
-                    responseObserver.onNext(response);
-                }
-            }
             responseObserver.onCompleted();
         }
 

@@ -1,9 +1,7 @@
 package io.grpc.proxy;
 
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
+import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
@@ -16,7 +14,7 @@ import java.util.logging.Logger;
 public class FarmClient {
     private static final Logger logger = Logger.getLogger(FarmClient.class.getName());
 
-    private final ManagedChannel channel;
+    private final ManagedChannel originChannel;
     private final FarmGrpc.FarmBlockingStub blockingStub;
     private final FarmGrpc.FarmStub asyncStub;
 
@@ -31,8 +29,16 @@ public class FarmClient {
      * Construct client for accessing Farm server using the existing channel.
      */
     public FarmClient(ManagedChannelBuilder<?> channelBuilder) {
-        channel = channelBuilder.build();
-        blockingStub = FarmGrpc.newBlockingStub(channel);
+        originChannel = channelBuilder.build();
+
+        ClientInterceptor interceptor = new HeaderClientInterceptor();
+        Channel channel = ClientInterceptors.intercept(originChannel, interceptor);
+
+        Metadata metadata = new Metadata();
+        Metadata.Key<String> key = Metadata.Key.of("farm-request-metadata", Metadata.ASCII_STRING_MARSHALLER);
+        metadata.put(key, "Message created in client!! This is the very important metadata from the very important farm");
+
+        blockingStub = MetadataUtils.attachHeaders(FarmGrpc.newBlockingStub(channel), metadata);
         asyncStub = FarmGrpc.newStub(channel);
     }
 
@@ -50,24 +56,17 @@ public class FarmClient {
 
         FarmClient client = new FarmClient("localhost", 8980);
         try {
-            //client.getVMSDataResponse("407838352", 456124);
+            client.getVMSDataResponse("407838352", 456124);
 
-            //client.getVMSDataResponse("0", 0);
+            client.getVMSDataResponse("0", 0);
 
-            /*client.listVMSDataResponse(createRequest("407838353", 456125),
-                    createRequest("407838354", 456126),
-                    createRequest("407838355", 456127),
-                    createRequest("407838356", 456128));
-*/
-            //client.listVMSDataResponseBySmallWrapper(createRequest("407838351", 456123));
+            client.listVMSDataResponseBySmallWrapper(createRequest("407838351", 456123));
 
             List<Item> items = new ArrayList<>();
             for (VMSDataResponse response : responses) {
                 items.add(response.getItem());
             }
             client.getFarmsSummaryMessage(items, 3);
-
-
 
             // Send and receive some notes.
             CountDownLatch finishLatch = client.farmChat();
@@ -85,7 +84,7 @@ public class FarmClient {
     }
 
     public void shutdown() throws InterruptedException {
-        channel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
+        originChannel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
     }
 
     public void getVMSDataResponse(String guid, int sourceid) {
@@ -103,33 +102,6 @@ public class FarmClient {
             info("Found vmsDataResponse with an item having guid {0} and  sourceid={1}", vmsDataResponse.getItem().getGuid(), vmsDataResponse.getItem().getSourceid());
         } else {
             info("Found no vmsDataResponse");
-        }
-    }
-
-    /**
-     * Blocking server-streaming example. Calls listFarmMessage with a requestWrapper. Prints each
-     * response  as it arrives.
-     */
-    public void listVMSDataResponse(VMSDataRequest req1, VMSDataRequest req2, VMSDataRequest req3, VMSDataRequest req4) {
-        info("*** listVMSDataResponse: req1={0} req2={1} req3={2} req4={3}", req1, req2, req3, req4);
-
-        RequestWrapper requestWrapper =
-                RequestWrapper.newBuilder()
-                        .setReq1(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838353").setSourceid(456125)))
-                        .setReq2(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838354").setSourceid(456126)))
-                        .setReq3(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838355").setSourceid(456127)))
-                        .setReq4(VMSDataRequest.newBuilder().setItem(Item.newBuilder().setGuid("407838356").setSourceid(456128)))
-                        .build();
-
-        Iterator<VMSDataResponse> responseIterator;
-        try {
-            responseIterator = blockingStub.listFarmMessage(requestWrapper);
-            for (int i = 1; responseIterator.hasNext(); i++) {
-                VMSDataResponse response = responseIterator.next();
-                info("Result #" + i + ": {0}", response);
-            }
-        } catch (StatusRuntimeException e) {
-            warning("RPC failed: {0}", e.getStatus());
         }
     }
 
@@ -153,9 +125,6 @@ public class FarmClient {
         }
     }
 
-    /**
-     * recordRoute
-     */
     public void getFarmsSummaryMessage(List<Item> items, int numRequests) throws InterruptedException {
         info("*** getFarmsSummaryMessage");
         final CountDownLatch finishLatch = new CountDownLatch(1);
@@ -186,7 +155,7 @@ public class FarmClient {
                 Item item = items.get(i);
                 streamObserver.onNext(item);
                 // Sleep for a bit before sending the next one.
-               // Thread.sleep(random.nextInt(1000) + 500);
+                // Thread.sleep(random.nextInt(1000) + 500);
                 info("Sending " + item);
                 if (finishLatch.getCount() == 0) {
                     // RPC completed or errored before we finished sending.
