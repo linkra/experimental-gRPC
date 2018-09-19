@@ -1,10 +1,19 @@
 package io.grpc.proxy;
 
 import io.grpc.*;
+import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import io.grpc.netty.shaded.io.netty.handler.ssl.ClientAuth;
+import io.grpc.netty.shaded.io.netty.handler.ssl.SslContextBuilder;
+import io.grpc.netty.shaded.io.netty.handler.ssl.SslProvider;
 import io.grpc.stub.StreamObserver;
 
+import javax.net.ssl.SSLException;
+import java.io.File;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.logging.Logger;
 
@@ -17,25 +26,48 @@ public class FarmServer {
     private  int port;
     private final Server server;
     private  Metadata headers;
+    private final String certChainFilePath;
+    private final String privateKeyFilePath;
+    private final String trustCertCollectionFilePath;
 
-    public FarmServer(int port)  throws IOException{
-        this(port, FarmUtil.getDefaultVMSDataResponseFile());
+    public FarmServer(int port, String certChainFilePath, String privateKeyFilePath, String trustCertCollectionFilePath)  throws IOException{
+
+        this(port, FarmUtil.getDefaultVMSDataResponseFile(),
+                certChainFilePath, privateKeyFilePath, trustCertCollectionFilePath);
+
+
+
     }
 
-    public FarmServer(int port, URL responseFile) throws IOException {
-        this(ServerBuilder.forPort(port), port, FarmUtil.parseResponse(responseFile));
+    public FarmServer(int port, URL responseFile,  String certChainFilePath, String privateKeyFilePath, String trustCertCollectionFilePath) throws IOException {
+        this(NettyServerBuilder.forAddress(new InetSocketAddress("localhost", port)),
+                port, FarmUtil.parseResponse(responseFile), certChainFilePath, privateKeyFilePath, trustCertCollectionFilePath);
     }
 
     /**
      * Create a RouteGuide server using serverBuilder as a base and features as data.
      */
-    public FarmServer(ServerBuilder<?> serverBuilder, int port, Collection<VMSDataResponse> response) {
+    public FarmServer(NettyServerBuilder serverBuilder, int port, Collection<VMSDataResponse> response,
+                      String certChainFilePath, String privateKeyFilePath, String trustCertCollectionFilePath) throws SSLException {
+        this.certChainFilePath =  ClassLoader.getSystemResource(certChainFilePath).toString();
+        this.privateKeyFilePath = ClassLoader.getSystemResource(privateKeyFilePath).toString();
+        this.trustCertCollectionFilePath = ClassLoader.getSystemResource(trustCertCollectionFilePath).toString();
         this.port = port;
         server = serverBuilder
                 .addService(ServerInterceptors.intercept(new FarmService(response), new HeaderServerInterceptor()))
+                .sslContext(getSslContextBuilder().build())
                 .build();
     }
-
+    private SslContextBuilder getSslContextBuilder() {
+        SslContextBuilder sslClientContextBuilder = SslContextBuilder.forServer(new File(certChainFilePath),
+                new File(privateKeyFilePath));
+        if (trustCertCollectionFilePath != null) {
+            sslClientContextBuilder.trustManager(new File(trustCertCollectionFilePath));
+            sslClientContextBuilder.clientAuth(ClientAuth.REQUIRE);
+        }
+        return GrpcSslContexts.configure(sslClientContextBuilder,
+                SslProvider.OPENSSL);
+    }
     /**
      * Start serving requests.
      */
@@ -76,7 +108,7 @@ public class FarmServer {
      * Main method.  This comment makes the linter happy.
      */
     public static void main(String[] args) throws Exception {
-        FarmServer server = new FarmServer(8980);
+        FarmServer server = new FarmServer(8980, "serverchain.pem" , "ui-key.pem" ,"root.pem");
         server.start();
         server.blockUntilShutdown();
     }
