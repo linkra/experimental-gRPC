@@ -1,9 +1,13 @@
 package io.grpc.proxy;
 
 import io.grpc.*;
+import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
 
+import javax.net.ssl.SSLException;
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
@@ -21,15 +25,19 @@ public class FarmClient {
     /**
      * Construct client for accessing Farm server at {@code host:port}.
      */
-    public FarmClient(String host, int port) {
-        this(ManagedChannelBuilder.forAddress(host, port).usePlaintext());
+    public FarmClient(String host, int port) throws SSLException {
+        this(NettyChannelBuilder.forAddress(host, port).usePlaintext());
     }
 
     /**
      * Construct client for accessing Farm server using the existing channel.
      */
-    public FarmClient(ManagedChannelBuilder<?> channelBuilder) {
-        originChannel = channelBuilder.build();
+    public FarmClient(NettyChannelBuilder channelBuilder) throws SSLException {
+        String path  = "client.crt";
+        String certFilePath = ClassLoader.getSystemResource(path).toString();
+        originChannel = channelBuilder
+               // .sslContext(GrpcSslContexts.forClient().trustManager(new File(certFilePath)).build())
+                .build();
 
         ClientInterceptor interceptor = new HeaderClientInterceptor();
         Channel channel = ClientInterceptors.intercept(originChannel, interceptor);
@@ -45,7 +53,7 @@ public class FarmClient {
     /**
      * Issues several different requests and then exits.
      */
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws InterruptedException, SSLException {
         List<VMSDataResponse> responses;
         try {
             responses = FarmUtil.parseResponse(FarmUtil.getDefaultVMSDataResponseFile());

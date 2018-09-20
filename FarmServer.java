@@ -25,46 +25,42 @@ public class FarmServer {
 
     private  int port;
     private final Server server;
-    private  Metadata headers;
     private final String certChainFilePath;
     private final String privateKeyFilePath;
-    private final String trustCertCollectionFilePath;
 
-    public FarmServer(int port, String certChainFilePath, String privateKeyFilePath, String trustCertCollectionFilePath)  throws IOException{
+    public FarmServer(int port, String certChainFilePath, String privateKeyFilePath)  throws IOException{
 
         this(port, FarmUtil.getDefaultVMSDataResponseFile(),
-                certChainFilePath, privateKeyFilePath, trustCertCollectionFilePath);
-
-
-
+                certChainFilePath, privateKeyFilePath);
     }
 
-    public FarmServer(int port, URL responseFile,  String certChainFilePath, String privateKeyFilePath, String trustCertCollectionFilePath) throws IOException {
+    public FarmServer(int port, URL responseFile,  String certChainFilePath, String privateKeyFilePath) throws IOException {
         this(NettyServerBuilder.forAddress(new InetSocketAddress("localhost", port)),
-                port, FarmUtil.parseResponse(responseFile), certChainFilePath, privateKeyFilePath, trustCertCollectionFilePath);
+                port, FarmUtil.parseResponse(responseFile), certChainFilePath, privateKeyFilePath);
     }
 
     /**
      * Create a RouteGuide server using serverBuilder as a base and features as data.
      */
     public FarmServer(NettyServerBuilder serverBuilder, int port, Collection<VMSDataResponse> response,
-                      String certChainFilePath, String privateKeyFilePath, String trustCertCollectionFilePath) throws SSLException {
+                      String certChainFilePath, String privateKeyFilePath) {
         this.certChainFilePath =  ClassLoader.getSystemResource(certChainFilePath).toString();
+        File debugFile = new File(certChainFilePath);
         this.privateKeyFilePath = ClassLoader.getSystemResource(privateKeyFilePath).toString();
-        this.trustCertCollectionFilePath = ClassLoader.getSystemResource(trustCertCollectionFilePath).toString();
         this.port = port;
         server = serverBuilder
+              //  .useTransportSecurity(new File(certChainFilePath), new File(privateKeyFilePath))
                 .addService(ServerInterceptors.intercept(new FarmService(response), new HeaderServerInterceptor()))
-                .sslContext(getSslContextBuilder().build())
                 .build();
+
     }
     private SslContextBuilder getSslContextBuilder() {
         SslContextBuilder sslClientContextBuilder = SslContextBuilder.forServer(new File(certChainFilePath),
                 new File(privateKeyFilePath));
-        if (trustCertCollectionFilePath != null) {
+       /* if (trustCertCollectionFilePath != null) {
             sslClientContextBuilder.trustManager(new File(trustCertCollectionFilePath));
             sslClientContextBuilder.clientAuth(ClientAuth.REQUIRE);
-        }
+        }*/
         return GrpcSslContexts.configure(sslClientContextBuilder,
                 SslProvider.OPENSSL);
     }
@@ -108,7 +104,7 @@ public class FarmServer {
      * Main method.  This comment makes the linter happy.
      */
     public static void main(String[] args) throws Exception {
-        FarmServer server = new FarmServer(8980, "serverchain.pem" , "ui-key.pem" ,"root.pem");
+        FarmServer server = new FarmServer(8980, "server.crt" , "server.pem");
         server.start();
         server.blockUntilShutdown();
     }
@@ -148,9 +144,6 @@ public class FarmServer {
                 }
             }
 
-            // FIXME!
-            // No VMSDataResponse was found, return a new VMSDataResponse
-            //return VMSDataResponse.newBuilder().setVmsdata(Item.newBuilder());
             logger.info("No VMSDataResponse was found!!");
             return null;
         }
