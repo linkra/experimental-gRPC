@@ -9,6 +9,8 @@ import io.grpc.stub.StreamObserver;
 import javax.net.ssl.SSLException;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -22,21 +24,42 @@ public class FarmClient {
     private final FarmGrpc.FarmBlockingStub blockingStub;
     private final FarmGrpc.FarmStub asyncStub;
 
-    /**
-     * Construct client for accessing Farm server at {@code host:port}.
-     */
-    public FarmClient(String host, int port) throws SSLException {
-        this(NettyChannelBuilder.forAddress(host, port).usePlaintext());
+    public FarmClient(String host, int port) {
+        this(ManagedChannelBuilder.forAddress(host, port).usePlaintext());
     }
+    /**
+     * Construct client for accessing Farm server using the existing channel.
+     * With metadata and header interceptor
+     */
+    public FarmClient(ManagedChannelBuilder<?> channelBuilder) {
+        originChannel = channelBuilder.build();
+
+        ClientInterceptor interceptor = new HeaderClientInterceptor();
+        Channel channel = ClientInterceptors.intercept(originChannel, interceptor);
+
+        Metadata metadata = new Metadata();
+        Metadata.Key<String> key = Metadata.Key.of("farm-request-metadata", Metadata.ASCII_STRING_MARSHALLER);
+        metadata.put(key, "This is the very important metadata from the very important farm");
+
+        blockingStub = MetadataUtils.attachHeaders(FarmGrpc.newBlockingStub(channel), metadata);
+        asyncStub = FarmGrpc.newStub(channel);
+    }
+
+    /**
+     * Construct client for accessing Farm server with SSL/TLS at {@code host:port}.
+     * FIXME! Got java.net.ConnectException: Connection refused: no further information: localhost/127.0.0.1:8980
+     */
+   /* public FarmClient(String host, int port) throws SSLException {
+        this(NettyChannelBuilder.forAddress(host, port));
+    }*/
 
     /**
      * Construct client for accessing Farm server using the existing channel.
      */
     public FarmClient(NettyChannelBuilder channelBuilder) throws SSLException {
-        String path  = "client.crt";
-        String certFilePath = ClassLoader.getSystemResource(path).toString();
+        Path rootsPath = Paths.get("target/classes/root.pem");
         originChannel = channelBuilder
-               // .sslContext(GrpcSslContexts.forClient().trustManager(new File(certFilePath)).build())
+                .sslContext(GrpcSslContexts.forClient().trustManager(rootsPath.toFile()).build())
                 .build();
 
         ClientInterceptor interceptor = new HeaderClientInterceptor();
@@ -62,7 +85,7 @@ public class FarmClient {
             return;
         }
 
-        FarmClient client = new FarmClient("localhost", 8980);
+        FarmClient client = new FarmClient("127.0.0.1", 8980);
         try {
             client.getVMSDataResponse("407838352", 456124);
 
@@ -76,8 +99,8 @@ public class FarmClient {
             }
             client.getFarmsSummaryMessage(items, 3);
 
-            // Send and receive some notes.
-            CountDownLatch finishLatch = client.farmChat();
+             // Send and receive some notes.
+           CountDownLatch finishLatch = client.farmChat();
 
             if (!finishLatch.await(1, TimeUnit.MINUTES)) {
                 client.warning("routeChat can not finish within 1 minutes");
@@ -163,7 +186,7 @@ public class FarmClient {
                 Item item = items.get(i);
                 streamObserver.onNext(item);
                 // Sleep for a bit before sending the next one.
-                // Thread.sleep(random.nextInt(1000) + 500);
+                 Thread.sleep(5);
                 info("Sending " + item);
                 if (finishLatch.getCount() == 0) {
                     // RPC completed or errored before we finished sending.
